@@ -19,7 +19,7 @@ import json
 from dataset import dataset_map,DatasetWithLogger
 from model import model_map,ModelBase
 
-# import argparse
+import argparse
 
 def ddpm_schedules(beta1: float, beta2: float, T: int) -> Dict[str, torch.Tensor]:
     """
@@ -110,10 +110,12 @@ class DDPM(nn.Module):
         x_0=x_i
         return x_0
 
-def train(n_epoch: int = 100, device=torch.cuda.device("cpu") , is_writer=True,dataset_name=None,data_dir=None,eps_model_name=None,result_dir=None,n_T=1000,batch_size=128,lr=2e-4) -> None:
+def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
+            n_epoch:int=100,n_T=1000,batch_size=128,lr=2e-4,sample_num=16,
+            device=torch.cuda.device("cpu") , use_tensorboard=True) -> None:
     if os.path.isdir(result_dir): 
         raise Exception(f"すでに結果ディレクトリ `{result_dir}`が存在します．学習を再開したい場合に備え，本機能は変更される可能性があります．") # TODO
-    writer=SummaryWriter(result_dir) if is_writer else None
+    writer=SummaryWriter(result_dir) if use_tensorboard else None
 
     try:
         eps_model:ModelBase=model_map[eps_model_name](1)
@@ -155,7 +157,9 @@ def train(n_epoch: int = 100, device=torch.cuda.device("cpu") , is_writer=True,d
         writer.add_scalar("Loss/train",torch.tensor(losses).mean(),epoch)
 
 
-        # inference にめっちゃ時間がかかる
+        # TODO Diffusionは推論のステップが大きく，逐次的という意味で並列化が難しい
+        # 今回の場合，特に低次元に置いて，GPUが余っているのに推論がボトルネックになっている．
+        # そのため以下のように実装する
         # モデルを保存して，プロセスを分離して，余っったGPUメモリを使ってサンプリングを行う．
         # サンプリングが遅いのでほっとくと溢れてしまうので，プロセスプールの管理をするようにする．
 
@@ -163,24 +167,35 @@ def train(n_epoch: int = 100, device=torch.cuda.device("cpu") , is_writer=True,d
         ddpm.eval()
         if result_dir!=None:
             with torch.no_grad():
-                is_log_epoch= (epoch%(n_epoch//10) ==0 or epoch==n_epoch-1) and is_writer
+                is_log_epoch= (epoch%(n_epoch//10) ==0 or epoch==n_epoch-1) and use_tensorboard
                 epoch_rate=(((epoch+1)*10)//n_epoch)/10
 
-                x0_pred = ddpm.sample(100000, data_shape, device,is_log_epoch,epoch_rate,writer,dataset) 
+                x0_pred = ddpm.sample(sample_num, data_shape, device,is_log_epoch,epoch_rate,writer,dataset)
+                # TODO sampleが大きくてGPUに乗らないとき，Batch処理を実装する
 
                 x0_pred=x0_pred.cpu().detach().numpy()
                 if is_log_epoch:
                     dataset.sample_logger_for_epoch(writer,x0_pred,epoch)
-                if epoch==n_epoch-1 and is_writer:
+                if epoch==n_epoch-1 and use_tensorboard:
                     dataset.sample_logger_for_last_epoch(writer,x0_pred)
                 np.savetxt(f"{result_dir}/psuede_sample_{epoch}.csv",x0_pred)
 
-# def get_parser():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("--overwrite", action="store_true")
-#     parser.add_argument("--device",default=0,help="put device id you want to use")
-#     parser.add_argument("--output_dir", "-out", default="./runs/PsudeExperiments",help="The store directory of tensorboard results")
-#     return parser
+def get_parser():
+    parser = argparse.ArgumentParser()
+    dbs='\n\t'.join(dataset_map.keys())
+    parser.add_argument("--dataset_name",help=f"You can use folloing strings.check dataset.py. {dbs}" )
+    parser.add_argument("--data_dir")
+    models='\n\t'.join(model_map.keys())
+    parser.add_argument("--eps_model_name",help=f"You can use folloing strings.check model.py. {models}" )
+    parser.add_argument("--result_dir")
+    parser.add_argument("--n_epoch",default=100)
+    parser.add_argument("--n_T",default=1000)
+    parser.add_argument("--batch_size",default=128)
+    parser.add_argument("--lr",default=2e-4)
+    parser.add_argument("--sample_num",default=16)
+    parser.add_argument("--device",default=0,help="put device id you want to use")
+    parser.add_argument("--use_tensorboard", action="store_true")
+    return parser
 
 if __name__ == "__main__":
     model="FFNModel"
@@ -191,4 +206,5 @@ if __name__ == "__main__":
     data_dir,dataset_name=f"data/psudedata/{size}size-1dim-1gmm-origin05","Psude1dimDataset"
     result_dir=f"./runs/debug"
 
-    train(n_epoch=100,is_writer=True,dataset_name=dataset_name,data_dir=data_dir,eps_model_name=model,result_dir=result_dir,n_T=n_T,batch_size=batch_size,lr=lr)
+    train(n_epoch=100,use_tensorboard=True,dataset_name=dataset_name,data_dir=data_dir,eps_model_name=model,result_dir=result_dir,n_T=n_T,batch_size=batch_size,lr=lr)
+
