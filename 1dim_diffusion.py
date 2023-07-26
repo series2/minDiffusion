@@ -333,6 +333,7 @@ def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,datase
         ddpm = DDPM(eps_model=DeepFFNModel(1), betas=(1e-4, 0.02), n_T=n_T)
     else:
         raise Exception(f"model {eps_model} is not exist")
+    print("USE",device)
     ddpm.to(device)
 
     tf = transforms.Compose(
@@ -415,25 +416,14 @@ def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,datase
 
 def do_many_train(args=None):
     #define use device
-    if args is not None and "device" in args:
-        device = torch.cuda.device(f"cuda:{args.device}")
-    else: device = torch.cuda.device("cpu")
+    if args is not None and ("device" in args and args.device is not None):
+        device = f"cuda:{args.device}"
+    else: device ="cpu"
 
     #result root dir specification
     result_root = args.output_dir
 
-    for size in sizes:
-        data_dir=f"data/psudedata/{size}size-1dim-1gmm"
-        d=Psude1dimDataset(save_dir=data_dir,size=size,
-        mus=np.array([5.0]),sigmas=np.array([1.0]),ws=np.array([1.0]))
-        for n_T in n_Ts:
-            for eps_model in models:
-                #result_dir=f"./runs/PsudeExperiments/{size}size-1dim-1gmm-{n_T}step-{eps_model}"
-                result_dir = os.path.join(result_root,f"{size}size-1dim-1gmm-{n_T}step-{eps_model}")
-                if os.path.exists(f"{result_dir}") and (args is not None and not args.overwrite):
-                    raise FileExistsError
-                writer=SummaryWriter(result_dir)
-                train(writer=writer,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T,device=device)
+    
     # models=["FFNModel","DeepFFNModel"]
     # models=["FFNModel"]
     # sizes=[1000,10000,100000]
@@ -477,10 +467,12 @@ def do_many_train(args=None):
         mus=np.array([ -50,10.0, 50]),sigmas=np.array([ 1.0, 1.0, 3.0]),ws=np.array([  0.3 ,  0.3 ,  0.4 ]))
         for n_T in n_Ts:
             for eps_model in models:
-                result_dir=f"./runs/PsudeExperiments/{size}size-1dim-3gmm2-{n_T}step-{eps_model}"
-                if os.path.isdir(f"{result_dir}"):continue
+                #result_dir=f"./runs/PsudeExperiments/{size}size-1dim-3gmm2-{n_T}step-{eps_model}"
+                result_dir = os.path.join(result_root,f"{size}size-1dim-1gmm-{n_T}step-{eps_model}")
+                if os.path.exists(f"{result_dir}") and (args is not None and not args.overwrite):
+                    raise FileExistsError
                 writer=SummaryWriter(result_dir)
-                train(writer=writer,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T)
+                train(writer=writer,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T,device=device)
 
 def show_distribution():
     # data_dir="data/psudedata/100000size-1dim-1gmm"
@@ -504,7 +496,7 @@ import argparse
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--device",help="put device id you want to use")
+    parser.add_argument("--device",default=0,help="put device id you want to use")
     parser.add_argument("--output_dir", "-out", default="./runs/PsudeExperiments",help="The store directory of tensorboard results")
     return parser
 
