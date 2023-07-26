@@ -19,6 +19,8 @@ import json
 from dataset import dataset_map,DatasetWithLogger
 from model import model_map,ModelBase
 
+# import argparse
+
 def ddpm_schedules(beta1: float, beta2: float, T: int) -> Dict[str, torch.Tensor]:
     """
     Returns pre-computed schedules for DDPM sampling, training process.
@@ -108,7 +110,7 @@ class DDPM(nn.Module):
         x_0=x_i
         return x_0
 
-def train(n_epoch: int = 100, device="cuda:0" , is_writer=True,dataset_name=None,data_dir=None,eps_model_name=None,result_dir=None,n_T=1000,batch_size=128,lr=2e-4) -> None:
+def train(n_epoch: int = 100, device=torch.cuda.device("cpu") , is_writer=True,dataset_name=None,data_dir=None,eps_model_name=None,result_dir=None,n_T=1000,batch_size=128,lr=2e-4) -> None:
     if os.path.isdir(result_dir): 
         raise Exception(f"すでに結果ディレクトリ `{result_dir}`が存在します．学習を再開したい場合に備え，本機能は変更される可能性があります．") # TODO
     writer=SummaryWriter(result_dir) if is_writer else None
@@ -173,6 +175,13 @@ def train(n_epoch: int = 100, device="cuda:0" , is_writer=True,dataset_name=None
                     dataset.sample_logger_for_last_epoch(writer,x0_pred)
                 np.savetxt(f"{result_dir}/psuede_sample_{epoch}.csv",x0_pred)
 
+# def get_parser():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("--overwrite", action="store_true")
+#     parser.add_argument("--device",default=0,help="put device id you want to use")
+#     parser.add_argument("--output_dir", "-out", default="./runs/PsudeExperiments",help="The store directory of tensorboard results")
+#     return parser
+
 if __name__ == "__main__":
     model="FFNModel"
     size=100000
@@ -181,4 +190,5 @@ if __name__ == "__main__":
     lr=2e-4 * 80
     data_dir,dataset_name=f"data/psudedata/{size}size-1dim-1gmm-origin05","Psude1dimDataset"
     result_dir=f"./runs/debug"
+
     train(n_epoch=100,is_writer=True,dataset_name=dataset_name,data_dir=data_dir,eps_model_name=model,result_dir=result_dir,n_T=n_T,batch_size=batch_size,lr=lr)
