@@ -112,10 +112,10 @@ class DDPM(nn.Module):
 
 def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
             n_epoch:int=100,n_T=1000,batch_size=128,lr=2e-4,sample_num=16,
-            device=torch.cuda.device("cpu") , use_tensorboard=True) -> None:
+            device="cpu", without_tensorboard=False) -> None:
     if os.path.isdir(result_dir): 
         raise Exception(f"すでに結果ディレクトリ `{result_dir}`が存在します．学習を再開したい場合に備え，本機能は変更される可能性があります．") # TODO
-    writer=SummaryWriter(result_dir) if use_tensorboard else None
+    writer=SummaryWriter(result_dir) if not without_tensorboard else None
 
     try:
         eps_model:ModelBase=model_map[eps_model_name](1)
@@ -154,7 +154,8 @@ def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
                 loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
             pbar.set_description(f"epoch:{epoch:5} loss: {loss_ema:.4f}")
             optim.step()
-        writer.add_scalar("Loss/train",torch.tensor(losses).mean(),epoch)
+        if not without_tensorboard:
+            writer.add_scalar("Loss/train",torch.tensor(losses).mean(),epoch)
 
 
         # TODO Diffusionは推論のステップが大きく，逐次的という意味で並列化が難しい
@@ -167,7 +168,7 @@ def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
         ddpm.eval()
         if result_dir!=None:
             with torch.no_grad():
-                is_log_epoch= (epoch%(n_epoch//10) ==0 or epoch==n_epoch-1) and use_tensorboard
+                is_log_epoch= (epoch%(n_epoch//10) ==0 or epoch==n_epoch-1) and not without_tensorboard
                 epoch_rate=(((epoch+1)*10)//n_epoch)/10
 
                 x0_pred = ddpm.sample(sample_num, data_shape, device,is_log_epoch,epoch_rate,writer,dataset)
@@ -176,35 +177,34 @@ def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
                 x0_pred=x0_pred.cpu().detach().numpy()
                 if is_log_epoch:
                     dataset.sample_logger_for_epoch(writer,x0_pred,epoch)
-                if epoch==n_epoch-1 and use_tensorboard:
+                if epoch==n_epoch-1 and not without_tensorboard:
                     dataset.sample_logger_for_last_epoch(writer,x0_pred)
                 np.savetxt(f"{result_dir}/psuede_sample_{epoch}.csv",x0_pred)
 
-def get_parser():
+def get_args():
     parser = argparse.ArgumentParser()
-    dbs='\n\t'.join(dataset_map.keys())
-    parser.add_argument("--dataset_name",help=f"You can use folloing strings.check dataset.py. {dbs}" )
-    parser.add_argument("--data_dir")
-    models='\n\t'.join(model_map.keys())
-    parser.add_argument("--eps_model_name",help=f"You can use folloing strings.check model.py. {models}" )
-    parser.add_argument("--result_dir")
+    dbs='`\t`'.join(dataset_map.keys())
+    parser.add_argument("--dataset_name",help=f"You can use folloing strings. check dataset.py.\t`{dbs}`" ,required=True)
+    parser.add_argument("--data_dir",required=True)
+    models='`\t`'.join(model_map.keys())
+    parser.add_argument("--eps_model_name",help=f"You can use folloing strings. check model.py. \t`{models}`" ,required=True)
+    parser.add_argument("--result_dir",required=True)
     parser.add_argument("--n_epoch",default=100)
     parser.add_argument("--n_T",default=1000)
     parser.add_argument("--batch_size",default=128)
     parser.add_argument("--lr",default=2e-4)
     parser.add_argument("--sample_num",default=16)
-    parser.add_argument("--device",default=0,help="put device id you want to use")
-    parser.add_argument("--use_tensorboard", action="store_true")
-    return parser
+    parser.add_argument("--device",default="cpu",help="put device id you want to use")
+    parser.add_argument("--without_tensorboard", action="store_false",help="if you add`--without_tensorboard` , cannot log for tensorboard.")
+    args = parser.parse_args()
+    return args
 
 if __name__ == "__main__":
-    model="FFNModel"
-    size=100000
-    n_T=100
-    batch_size=8192
-    lr=2e-4 * 80
-    data_dir,dataset_name=f"data/psudedata/{size}size-1dim-1gmm-origin05","Psude1dimDataset"
-    result_dir=f"./runs/debug"
+    # if you cannot know how to execute this , do `python diffusion.py -h`.
+    args=get_args()
+    kwargs = args.__dict__
+    train(**kwargs)
 
-    train(n_epoch=100,use_tensorboard=True,dataset_name=dataset_name,data_dir=data_dir,eps_model_name=model,result_dir=result_dir,n_T=n_T,batch_size=batch_size,lr=lr)
-
+"""execute sample (same as execute_example.sh)
+python diffusion.py --dataset_name Psude1dimDataset --data_dir data/psudedata/100000size-1dim-1gmm-origin05 --eps_model_name FFNModel --result_dir ./runs/debug
+"""
