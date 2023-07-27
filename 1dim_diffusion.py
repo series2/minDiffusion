@@ -361,6 +361,7 @@ def train(n_epoch: int = 100, device="cuda:0" , is_writer=True,dataset_name=None
         ddpm = DDPM(eps_model=DeepFFNModel(1), betas=(1e-4, 0.02), n_T=n_T)
     else:
         raise Exception(f"model {eps_model} is not exist")
+    print("USE",device)
     ddpm.to(device)
 
     tf = transforms.Compose(
@@ -447,7 +448,17 @@ def train(n_epoch: int = 100, device="cuda:0" , is_writer=True,dataset_name=None
 # def psude_dataset_test():
 #     d=Psude1dimDataset(save_dir="data/psudedata/2023-07-17 21:23:27.281479")
 #     d.show_distribution(compare_to="./contents/psude/psuede_sample_99.csv")
-def do_many_train():
+
+def do_many_train(args=None):
+    #define use device
+    if args is not None and ("device" in args and args.device is not None):
+        device = f"cuda:{args.device}"
+    else: device ="cpu"
+
+    #result root dir specification
+    result_root = args.output_dir
+
+    
     # models=["FFNModel","DeepFFNModel"]
     # models=["FFNModel"]
     # sizes=[1000,10000,100000]
@@ -542,31 +553,12 @@ def do_many_train():
             mus=np.array([0.0]),sigmas=np.array([0.5]),ws=np.array([1.0]))
         for n_T in n_Ts:
             for eps_model in models:
-                result_dir=f"./runs/epochs-step-relation/{size}size-1dim-1gmm-origin05-{n_T}step-{eps_model}"
-                if os.path.isdir(f"{result_dir}"):continue
-                train(n_epoch=n_T*1,is_writer=True,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T,batch_size=batch_size,lr=lr)
-    
-    models=["FFN3Model"]
-    sizes=[100000]
-    n_Ts=[100,50,10000,10,500,1000,2]
-    batch_size=8192
-    lr=2e-4 * 80
-    for size in sizes:
-        data_dir=f"data/psudedata/{size}size-1dim-1gmm-origin05"
-        d=Psude1dimDataset(save_dir=data_dir,size=size,
-            mus=np.array([0.0]),sigmas=np.array([0.5]),ws=np.array([1.0]))
-        for n_T in n_Ts:
-            for eps_model in models:
-                result_dir=f"./runs/epochs-step-relation/{size}size-1dim-1gmm-origin05-{n_T}step-{eps_model}"
-                if os.path.isdir(f"{result_dir}"):continue
-                train(n_epoch=n_T*1,is_writer=True,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T,
-                batch_size=batch_size,lr=lr)
-
-
-# def create_data():
-#     save_dir=""
-#     Psude1dimDataset(save_dir=save_dir,size=size,
-#         mus=np.array([ -50,10.0, 50]),sigmas=np.array([ 1.0, 1.0, 3.0]),ws=np.array([  0.3 ,  0.3 ,  0.4 ]))
+                #result_dir=f"./runs/PsudeExperiments/{size}size-1dim-3gmm2-{n_T}step-{eps_model}"
+                result_dir = os.path.join(result_root,f"{size}size-1dim-1gmm-{n_T}step-{eps_model}")
+                if os.path.exists(f"{result_dir}") and (args is not None and not args.overwrite):
+                    raise FileExistsError
+                writer=SummaryWriter(result_dir)
+                train(writer=writer,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T,device=device)
 
 def show_distribution():
     # data_dir="data/psudedata/100000size-1dim-1gmm"
@@ -585,13 +577,22 @@ def show_distribution():
     #     f"{result_dir}/psuede_sample_99.csv",
     # ],show_orig=False,cut=True)
 
+import argparse
+
+def get_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--device",default=0,help="put device id you want to use")
+    parser.add_argument("--output_dir", "-out", default="./runs/PsudeExperiments",help="The store directory of tensorboard results")
+    return parser
 
 
 if __name__ == "__main__":
     # writer=SummaryWriter("./runs/NNIST")
     # train(writer=writer)
-
-    do_many_train()
+    parser = get_parser()
+    args = parser.parse_args()
+    do_many_train(args)
 
     # show_distribution()
 
