@@ -115,7 +115,18 @@ def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
             device="cpu", without_tensorboard=False) -> None:
     if os.path.isdir(result_dir): 
         raise Exception(f"すでに結果ディレクトリ `{result_dir}`が存在します．学習を再開したい場合に備え，本機能は変更される可能性があります．") # TODO
+    else:
+        os.makedirs(f"{result_dir}")
+
     writer=SummaryWriter(result_dir) if not without_tensorboard else None
+
+    params={"dataset_name":dataset_name,"data_dir":data_dir,"eps_model_name":eps_model_name,result_dir:result_dir,
+            "n_epoch":n_epoch,"n_T":n_T,"batch_size":batch_size,"lr":lr,"sample_num":sample_num,
+            "device":device,"without_tensorboard":without_tensorboard}
+    if not without_tensorboard:
+        writer.add_text("params",json.dumps(params, indent=2),step=0)
+    with open(f"{result_dir}/params.json","w") as f:
+        json.dump(params,f,indent=2)
 
     try:
         eps_model:ModelBase=model_map[eps_model_name](1)
@@ -126,14 +137,10 @@ def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
     except Exception as e:
         raise Exception(f"datasetの読みこみに失敗しました．\n{e}")
     
-    
     ddpm = DDPM(eps_model=eps_model, betas=(1e-4, 0.02), n_T=n_T)
     ddpm.to(device)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=20)
     optim = torch.optim.Adam(ddpm.parameters(), lr=lr)
-
-    if not os.path.isdir(f"{result_dir}"):
-        os.makedirs(f"{result_dir}")
 
     for epoch in range(n_epoch):
         ddpm.train()
