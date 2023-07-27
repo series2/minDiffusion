@@ -1,7 +1,4 @@
-data
 __pycache__
-*.pth
-ddpm*.png
-.env
+data
 runs
-contents
+.env

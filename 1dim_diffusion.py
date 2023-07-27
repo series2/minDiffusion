@@ -107,6 +107,29 @@ class FFNModel(nn.Module):
         return x
         # return self.ffn(x)
 
+class FFN3Model(nn.Module):
+    def __init__(self,dim) -> None:
+        super(FFN3Model, self).__init__()
+        # self.ffn = nn.Sequential(
+        #     nn.Linear(dim,5),
+        #     nn.Sigmoid(),
+        #     nn.Linear(5,dim)
+        # )
+        self.ffn1=nn.Linear(dim,5)
+        self.sig=nn.Sigmoid()
+        self.ffn2=nn.Linear(5,dim)
+
+    def forward(self, x, t) -> torch.Tensor:
+        # print("first",x.shape)
+        x=self.ffn1(x)
+        # print(x.shape)
+        x=self.sig(x)
+        # print(x.shape)
+        x=self.ffn2(x)
+        # print(x.shape)
+        x=x**3
+        return x
+
 class DeepFFNModel(nn.Module):
     def __init__(self,dim) -> None:
         super(DeepFFNModel, self).__init__()
@@ -169,29 +192,31 @@ class DDPM(nn.Module):
         # We should predict the "error term" from this x_t. Loss is what we return.
         eps_pred=self.eps_model(x_t, _ts / self.n_T)
 
-        eps_sum,eps_s_sum= eps.sum(),(eps*eps).sum()
-        eps_pred_sum,eps_pred_s_sum= eps_pred.sum(),(eps_pred*eps_pred).sum()
+        #eps_sum,eps_s_sum= eps.sum(),(eps*eps).sum()
+        #eps_pred_sum,eps_pred_s_sum= eps_pred.sum(),(eps_pred*eps_pred).sum()
 
-
-        return self.criterion(eps, eps_pred) , (eps_sum,eps_s_sum) ,( eps_pred_sum,eps_pred_s_sum)
+        return self.criterion(eps, eps_pred) #, (eps_sum,eps_s_sum) ,( eps_pred_sum,eps_pred_s_sum)
 
     def sample(self, n_sample: int, size, device,r=None,writer:SummaryWriter=None) -> torch.Tensor:
 
         x_i = torch.randn(n_sample, *size).to(device)  # x_T ~ N(0, 1)
-
+        if writer!=None:writer.add_histogram(f'{r}epochrate_xt_distribution-by-step', x_i,0)
         # This samples accordingly to Algorithm 2. It is exactly the same logic.
         for i in range(self.n_T, 0, -1): # i = self.N_T , self.n_T-1 , ... , 1 
             z = torch.randn(n_sample, *size).to(device) if i > 1 else 0
-            eps = self.eps_model(x_i, i / self.n_T)
-            x_0_pred = self.oneover_sqrta[i] * (x_i - eps * self.mab_over_sqrtmab[i])
+            eps_pred = self.eps_model(x_i, i / self.n_T)
+            x_0_pred = self.oneover_sqrta[i] * (x_i - eps_pred * self.mab_over_sqrtmab[i])
             x_i = (
                 x_0_pred + self.sqrt_beta_t[i] * z
             )
             if r!=None and writer!=None and  i%(max(1,self.n_T//10)) ==0:
+                writer.add_histogram(f'{r}epochrate_epspred_distribution-by-step', eps_pred, self.n_T-i+1)
                 writer.add_histogram(f'{r}epochrate_x0pred_distribution-by-step', x_0_pred, self.n_T-i+1)
                 writer.add_histogram(f'{r}epochrate_xt_distribution-by-step', x_i, self.n_T-i+1)
-
-        return x_i
+                writer.add_scalar(f"{r}epochrate_epspred_var-by-step",eps_pred.std(), self.n_T-i+1)
+                writer.add_scalar(f"{r}epochrate_x0pred_var-by-step",x_0_pred.std(), self.n_T-i+1)
+        x_0=x_i
+        return x_0
 class Psude1dimDataset(Dataset):
     """
     現状json + ハードコーディングだが，yamlにしておきたい．
@@ -267,7 +292,7 @@ class Psude1dimClassedDataset(Dataset):
         sampled_data=None
         if save_dir==None:
             save_dir=f"data/psudedata/{datetime.datetime.now()}"
-        if not os.path.isdir(save_dir):
+        if not os.path.isdir(save_dir): 
             # 3つの峰を持つ混合ガウス分布
             self.mus    = mus
             self.sigmas = sigmas
@@ -323,12 +348,15 @@ class Psude1dimClassedDataset(Dataset):
     
 
 
-def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,dataset_name=None,data_dir=None,eps_model=None,result_dir=None,n_T=1000) -> None:
+def train(n_epoch: int = 100, device="cuda:0" , is_writer=True,dataset_name=None,data_dir=None,eps_model=None,result_dir=None,n_T=1000,batch_size=128,lr=2e-4) -> None:
+    writer=SummaryWriter(result_dir) if is_writer else None
     # dataset パラメタは一時的なもの．もうちょっとちゃんとしたい
     if eps_model==None:
         ddpm = DDPM(eps_model=DummyEpsModel(1), betas=(1e-4, 0.02), n_T=n_T)
     elif eps_model=="FFNModel":
         ddpm = DDPM(eps_model=FFNModel(1), betas=(1e-4, 0.02), n_T=n_T)
+    elif eps_model=="FFN3Model":
+        ddpm = DDPM(eps_model=FFN3Model(1), betas=(1e-4, 0.02), n_T=n_T)
     elif eps_model=="DeepFFNModel":
         ddpm = DDPM(eps_model=DeepFFNModel(1), betas=(1e-4, 0.02), n_T=n_T)
     else:
@@ -355,8 +383,8 @@ def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,datase
     else:
         raise Exception("存在しない")
     
-    dataloader = DataLoader(dataset, batch_size=128, shuffle=True, num_workers=20)
-    optim = torch.optim.Adam(ddpm.parameters(), lr=2e-4)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=20)
+    optim = torch.optim.Adam(ddpm.parameters(), lr=lr)
 
     for i in range(n_epoch):
         ddpm.train()
@@ -372,7 +400,7 @@ def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,datase
             # exit()
             optim.zero_grad()
             x = x.to(device)
-            loss,(eps_sum_,eps_s_sum_) ,( eps_pred_sum_,eps_pred_s_sum_) = ddpm(x)
+            loss= ddpm(x)
 
             loss.backward()
             losses.append(loss.item())
@@ -383,6 +411,12 @@ def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,datase
             pbar.set_description(f"epoch:{i:5} loss: {loss_ema:.4f}")
             optim.step()
         writer.add_scalar("Loss/train",torch.tensor(losses).mean(),i)
+
+
+        # inference にめっちゃ時間がかかる
+        # モデルを保存して，プロセスを分離して，余っったGPUメモリを使ってサンプリングを行う．
+        # サンプリングが遅いのでほっとくと溢れてしまうので，プロセスプールの管理をするようにする．
+        
         data_shape=x[0].shape
         ddpm.eval()
         if result_dir!=None:
@@ -395,16 +429,17 @@ def train(n_epoch: int = 100, device="cuda:0" , writer:SummaryWriter=None,datase
                     if not os.path.isdir(f"{result_dir}"):
                         os.makedirs(f"{result_dir}")
                     if i%(n_epoch//10) ==0 or i==n_epoch-1:
-                        xh = ddpm.sample(100000, data_shape, device,i/n_epoch,writer) # log reverse diffusion process
+                        xh = ddpm.sample(100000, data_shape, device,(((i+1)*10)//n_epoch)/10,writer) # log reverse diffusion process
                     else:
                         xh = ddpm.sample(100000, data_shape, device)
                     xh=xh.cpu().detach().numpy()
                     if i%(n_epoch//10) ==0 or i==n_epoch-1:
                         writer.add_histogram('finalstep_distribution-by-epoch', xh, i)
+                    if i==n_epoch-1:
+                        writer.add_embedding(xh)
                     np.savetxt(f"{result_dir}/psuede_sample_{i}.csv",xh)
                 else:
                     raise Exception(f"Invalid. dataset_name ... {dataset_name}")
-                
 
             # save model
             # if i%10==0 or i==n_epoch-1:
@@ -458,13 +493,64 @@ def do_many_train(args=None):
     #             writer=SummaryWriter(result_dir)
     #             train(writer=writer,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T)
     
+    # models=["FFNModel"]
+    # sizes=[100000]
+    # n_Ts=[2,10,50,100,500,1000,10000]
+    # for size in sizes:
+    #     data_dir=f"data/psudedata/{size}size-1dim-3gmm2"
+    #     d=Psude1dimDataset(save_dir=data_dir,size=size,
+    #     mus=np.array([ -50,10.0, 50]),sigmas=np.array([ 1.0, 1.0, 3.0]),ws=np.array([  0.3 ,  0.3 ,  0.4 ]))
+    #     for n_T in n_Ts:
+    #         for eps_model in models:
+    #             result_dir=f"./runs/PsudeExperiments/{size}size-1dim-3gmm2-{n_T}step-{eps_model}"
+    #             if os.path.isdir(f"{result_dir}"):continue
+    #             train(is_writer=True,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T)
+
+    # models=["FFNModel"]
+    # sizes=[100000]
+    # n_Ts=[100,50,10000,2,10,500,1000]
+    # for size in sizes:
+    #     data_dir=f"data/psudedata/{size}size-1dim-3gmm"
+    #     for n_T in n_Ts:
+    #         for eps_model in models:
+    #             result_dir=f"./runs/PsudeExperiments2/{size}size-1dim-3gmm-{n_T}step-{eps_model}"
+    #             if os.path.isdir(f"{result_dir}"):continue
+    #             train(is_writer=True,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T)
+    
+    # models=["FFNModel"]
+    # sizes=[100000]
+    # n_Ts=[100,50,10000,2,10,500,1000]
+    # for size in sizes:
+    #     data_dir=f"data/psudedata/{size}size-1dim-1gmm"
+    #     for n_T in n_Ts:
+    #         for eps_model in models:
+    #             result_dir=f"./runs/PsudeExperiments2/{size}size-1dim-1gmm-{n_T}step-{eps_model}"
+    #             if os.path.isdir(f"{result_dir}"):continue
+    #             train(is_writer=True,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T)
+    
+    # models=["FFNModel"]
+    # sizes=[100000]
+    # n_Ts=[100,50,10000,2,10,500,1000]
+    # for size in sizes:
+    #     data_dir=f"data/psudedata/{size}size-1dim-1gmm-origin05"
+    #     d=Psude1dimDataset(save_dir=data_dir,size=size,
+    #         mus=np.array([0.0]),sigmas=np.array([0.5]),ws=np.array([1.0]))
+    #     for n_T in n_Ts:
+    #         for eps_model in models:
+    #             result_dir=f"./runs/PsudeExperiments2/{size}size-1dim-1gmm-origin05-{n_T}step-{eps_model}"
+    #             if os.path.isdir(f"{result_dir}"):continue
+    #             train(is_writer=True,dataset_name="Psude1dimDataset",data_dir=data_dir,eps_model=eps_model,result_dir=result_dir,n_T=n_T)
+
+    
     models=["FFNModel"]
     sizes=[100000]
-    n_Ts=[2,10,100,500,1000,10000]
+    n_Ts=[100,50,10000,10,500,1000,2]
+    batch_size=8192
+    lr=2e-4 * 80
     for size in sizes:
-        data_dir=f"data/psudedata/{size}size-1dim-3gmm2"
+        data_dir=f"data/psudedata/{size}size-1dim-1gmm-origin05"
         d=Psude1dimDataset(save_dir=data_dir,size=size,
-        mus=np.array([ -50,10.0, 50]),sigmas=np.array([ 1.0, 1.0, 3.0]),ws=np.array([  0.3 ,  0.3 ,  0.4 ]))
+            mus=np.array([0.0]),sigmas=np.array([0.5]),ws=np.array([1.0]))
         for n_T in n_Ts:
             for eps_model in models:
                 #result_dir=f"./runs/PsudeExperiments/{size}size-1dim-3gmm2-{n_T}step-{eps_model}"
