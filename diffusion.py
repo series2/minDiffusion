@@ -124,7 +124,7 @@ def train(dataset_name:str,data_dir:str,eps_model_name:str,result_dir:str,
             "n_epoch":n_epoch,"n_T":n_T,"batch_size":batch_size,"lr":lr,"sample_num":sample_num,
             "device":device,"without_tensorboard":without_tensorboard}
     if not without_tensorboard:
-        writer.add_text("params",json.dumps(params, indent=2),step=0)
+        writer.add_text("params",json.dumps(params, indent=2),global_step=0)
     with open(f"{result_dir}/params.json","w") as f:
         json.dump(params,f,indent=2)
 
@@ -202,7 +202,7 @@ def get_args():
     parser.add_argument("--lr",default=2e-4,type=float)
     parser.add_argument("--sample_num",default=16,type=int)
     parser.add_argument("--device",default="cpu",help="put device id you want to use")
-    parser.add_argument("--without_tensorboard", action="store_false",help="if you add`--without_tensorboard` , cannot log for tensorboard.")
+    parser.add_argument("--without_tensorboard", action="store_true",help="if you add`--without_tensorboard` , cannot log for tensorboard.")
     args = parser.parse_args()
     return args
 
